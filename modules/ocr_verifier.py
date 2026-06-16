@@ -1,121 +1,227 @@
 import easyocr
-import re
 import numpy as np
+import traceback
 
-from modules.utils import pdf_to_images, preprocess_fast, load_image
+from modules.utils import (
+    pdf_to_images,
+    preprocess_fast,
+    load_image
+)
+
+from modules.verification_engine import VerificationEngine
+from modules.context_validator import ContextValidator
 
 
 class OCRVerifier:
 
     def __init__(self):
-        self.reader = easyocr.Reader(['en'], gpu=False)
 
-        self.patterns = {
-            "license": r"[A-Z]{2}\d{2}[A-Z0-9]{11,13}",
-            "vehicle": r"[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{3,4}",
-            "date": r"\d{2}[/-]\d{2}[/-]\d{4}"
-        }
+        print("Loading EasyOCR...")
 
-    # =====================================================
-    # MAIN
-    # =====================================================
+        self.reader = easyocr.Reader(
+            ['en'],
+            gpu=False
+        )
+
+        self.verifier = VerificationEngine()
+        self.context = ContextValidator()
+
+        print("OCRVerifier Ready")
+
+    # =====================================
+    # MAIN PIPELINE
+    # =====================================
     def process(self, file):
 
-        images = self._load_input(file)
+        try:
 
-        all_text = []
-        all_conf = []
+            images = self._load_input(file)
 
-        for img in images:
-            text, conf = self._run_ocr(img)
-            all_text.extend(text)
-            all_conf.extend(conf)
+            if not images:
+                return self._empty_result("No images loaded")
 
-        full_text = " ".join(all_text)
+            all_text = []
+            all_conf = []
 
-        fields = self._extract_fields(full_text)
-        validation = self._validate(fields, all_conf)
+            for img in images:
 
-        return {
-            "raw_text": full_text,
-            "fields": fields,
-            "validation": validation,
-            "confidence_score": float(np.mean(all_conf)) if all_conf else 0.0,
-            "risk_penalty": self._compute_penalty(validation)
-        }
+                texts, confs = self._run_ocr(img)
 
-    # =====================================================
-    # INPUT HANDLING (IMPORTANT FIX)
-    # =====================================================
+                all_text.extend(texts)
+                all_conf.extend(confs)
+
+            full_text = " ".join(all_text).strip()
+
+            if not full_text:
+                return self._empty_result("OCR returned empty text")
+
+            # =====================================
+            # STEP 1: CLASSIFY
+            # =====================================
+            document_type = self.verifier.classify_document(full_text)
+
+            # =====================================
+            # STEP 2: EXTRACT
+            # =====================================
+            entities = self.verifier.extract_entities(full_text)
+            entities["raw_text"] = full_text
+
+            # =====================================
+            # STEP 3: CONTEXT VALIDATION (NEW FIX)
+            # =====================================
+            context_result = self.context.validate(
+                document_type,
+                entities,
+                full_text
+            )
+
+            # =====================================
+            # STEP 4: VERIFICATION (FINAL SCORE)
+            # =====================================
+            verification = self.verifier.verify(
+                document_type,
+                entities,
+                context_boost=context_result["score_boost"]
+            )
+
+            # =====================================
+            # CONFIDENCE SCORE
+            # =====================================
+            confidence_score = (
+                float(np.mean(all_conf))
+                if all_conf else 0.0
+            )
+
+            # =====================================
+            # RISK SCORE
+            # =====================================
+            risk_penalty = max(
+                0,
+                100 - verification["verification_score"]
+            )
+
+            return {
+                "document_type": document_type,
+                "verified": verification["verified"],
+                "verification_score": verification["verification_score"],
+                "confidence_score": confidence_score,
+                "entities": entities,
+                "issues": verification["issues"] + context_result["issues"],
+                "risk_penalty": risk_penalty,
+                "raw_text": full_text
+            }
+
+        except Exception as e:
+
+            print("OCR PIPELINE ERROR")
+            print(traceback.format_exc())
+
+            return self._empty_result(str(e))
+
+    # =====================================
+    # INPUT LOADING
+    # =====================================
     def _load_input(self, file):
 
-        if hasattr(file, "name") and file.name.lower().endswith(".pdf"):
-            return pdf_to_images(file)
+        images = []
 
-        return [load_image(file)]
+        try:
 
-    # =====================================================
-    # OCR
-    # =====================================================
+            # Streamlit upload
+            if hasattr(file, "name"):
+
+                if file.name.lower().endswith(".pdf"):
+                    images = pdf_to_images(file)
+                else:
+                    img = load_image(file)
+                    if img is not None:
+                        images.append(img)
+
+            # file path
+            elif isinstance(file, str):
+
+                if file.lower().endswith(".pdf"):
+                    images = pdf_to_images(file)
+                else:
+                    img = load_image(file)
+                    if img is not None:
+                        images.append(img)
+
+        except Exception as e:
+            print("INPUT ERROR:", e)
+            print(traceback.format_exc())
+
+        return images
+
+    # =====================================
+    # OCR ENGINE
+    # =====================================
     def _run_ocr(self, img):
 
-        processed = preprocess_fast(img)
-        results = self.reader.readtext(processed)
+        try:
 
-        texts, confs = [], []
+            processed = preprocess_fast(img)
 
-        for _, text, conf in results:
-            if text:
+            results = self.reader.readtext(
+                processed,
+                detail=1
+            )
+
+            texts = []
+            confs = []
+
+            for item in results:
+
+                if len(item) < 3:
+                    continue
+
+                _, text, conf = item
+
+                text = str(text).strip()
+
+                if not text:
+                    continue
+
                 texts.append(text)
-                confs.append(float(conf))
 
-        return texts, confs
+                try:
+                    confs.append(float(conf))
+                except:
+                    confs.append(0.5)
 
-    # =====================================================
-    # EXTRACTION
-    # =====================================================
-    def _extract_fields(self, text):
+            return texts, confs
 
-        return {
-            "license_number": re.search(self.patterns["license"], text).group(0)
-            if re.search(self.patterns["license"], text) else None,
+        except Exception as e:
 
-            "vehicle_number": re.search(self.patterns["vehicle"], text).group(0)
-            if re.search(self.patterns["vehicle"], text) else None,
+            print("OCR ERROR:", e)
+            return [], []
 
-            "dates": re.findall(self.patterns["date"], text),
-
-            "name": None
-        }
-
-    # =====================================================
-    # VALIDATION
-    # =====================================================
-    def _validate(self, fields, confs):
-
-        mean_conf = float(np.mean(confs)) if confs else 0.0
+    # =====================================
+    # EMPTY RESULT
+    # =====================================
+    def _empty_result(self, reason):
 
         return {
-            "license_valid": fields["license_number"] is not None,
-            "vehicle_valid": fields["vehicle_number"] is not None,
-            "missing_fields": [k for k, v in fields.items() if not v],
-            "low_confidence": mean_conf < 0.6,
-            "date_detected": len(fields["dates"]) > 0
+            "document_type": "UNKNOWN",
+            "verified": False,
+            "verification_score": 0,
+            "confidence_score": 0.0,
+            "entities": {
+                "license_numbers": [],
+                "vehicle_numbers": [],
+                "dates": [],
+                "engine_numbers": [],
+                "chassis_numbers": [],
+                "policy_numbers": [],
+                "persons": [],
+                "organizations": [],
+                "locations": [],
+                "raw_text": ""
+            },
+            "issues": [
+                reason,
+                "Low OCR confidence"
+            ],
+            "risk_penalty": 100,
+            "raw_text": ""
         }
-
-    # =====================================================
-    # PENALTY
-    # =====================================================
-    def _compute_penalty(self, validation):
-
-        penalty = 0
-        if validation["missing_fields"]:
-            penalty += 30
-        if not validation["license_valid"]:
-            penalty += 40
-        if validation["low_confidence"]:
-            penalty += 20
-        if not validation["date_detected"]:
-            penalty += 10
-
-        return penalty
