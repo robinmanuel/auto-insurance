@@ -9,7 +9,6 @@ from modules.utils import (
 )
 
 from modules.verification_engine import VerificationEngine
-from modules.context_validator import ContextValidator
 
 
 class OCRVerifier:
@@ -24,12 +23,11 @@ class OCRVerifier:
         )
 
         self.verifier = VerificationEngine()
-        self.context = ContextValidator()
 
         print("OCRVerifier Ready")
 
     # =====================================
-    # MAIN PIPELINE
+    # MAIN
     # =====================================
     def process(self, file):
 
@@ -52,68 +50,55 @@ class OCRVerifier:
 
             full_text = " ".join(all_text).strip()
 
-            if not full_text:
-                return self._empty_result("OCR returned empty text")
+            if len(full_text) == 0:
+                return self._empty_result("OCR returned no text")
 
-            # =====================================
-            # STEP 1: CLASSIFY
-            # =====================================
+            # ============================
+            # PIPELINE
+            # ============================
             document_type = self.verifier.classify_document(full_text)
 
-            # =====================================
-            # STEP 2: EXTRACT
-            # =====================================
             entities = self.verifier.extract_entities(full_text)
             entities["raw_text"] = full_text
 
-            # =====================================
-            # STEP 3: CONTEXT VALIDATION (NEW FIX)
-            # =====================================
-            context_result = self.context.validate(
-                document_type,
-                entities,
-                full_text
-            )
-
-            # =====================================
-            # STEP 4: VERIFICATION (FINAL SCORE)
-            # =====================================
             verification = self.verifier.verify(
                 document_type,
-                entities,
-                context_boost=context_result["score_boost"]
+                entities
             )
 
-            # =====================================
-            # CONFIDENCE SCORE
-            # =====================================
             confidence_score = (
-                float(np.mean(all_conf))
-                if all_conf else 0.0
+                float(np.mean(all_conf)) if all_conf else 0.0
             )
 
-            # =====================================
-            # RISK SCORE
-            # =====================================
             risk_penalty = max(
                 0,
                 100 - verification["verification_score"]
             )
 
+            # ============================
+            # LOGGING ONLY (NOT UI)
+            # ============================
+            print("\n========== INTERNAL DEBUG ==========")
+            print("DOC TYPE:", document_type)
+            print("ENTITIES:", entities)
+            print("ISSUES:", verification["issues"])
+            print("RISK:", risk_penalty)
+            print("RAW TEXT:", full_text[:300], "...")
+            print("===================================\n")
+
+            # ============================
+            # CLEAN OUTPUT (STREAMLIT ONLY)
+            # ============================
             return {
                 "document_type": document_type,
                 "verified": verification["verified"],
                 "verification_score": verification["verification_score"],
-                "confidence_score": confidence_score,
-                "entities": entities,
-                "issues": verification["issues"] + context_result["issues"],
-                "risk_penalty": risk_penalty,
-                "raw_text": full_text
+                "confidence_score": confidence_score
             }
 
         except Exception as e:
 
-            print("OCR PIPELINE ERROR")
+            print("OCR ERROR")
             print(traceback.format_exc())
 
             return self._empty_result(str(e))
@@ -127,7 +112,6 @@ class OCRVerifier:
 
         try:
 
-            # Streamlit upload
             if hasattr(file, "name"):
 
                 if file.name.lower().endswith(".pdf"):
@@ -137,7 +121,6 @@ class OCRVerifier:
                     if img is not None:
                         images.append(img)
 
-            # file path
             elif isinstance(file, str):
 
                 if file.lower().endswith(".pdf"):
@@ -148,13 +131,13 @@ class OCRVerifier:
                         images.append(img)
 
         except Exception as e:
-            print("INPUT ERROR:", e)
+            print("LOAD INPUT ERROR:", e)
             print(traceback.format_exc())
 
         return images
 
     # =====================================
-    # OCR ENGINE
+    # OCR
     # =====================================
     def _run_ocr(self, img):
 
@@ -192,8 +175,7 @@ class OCRVerifier:
             return texts, confs
 
         except Exception as e:
-
-            print("OCR ERROR:", e)
+            print("OCR RUN ERROR:", e)
             return [], []
 
     # =====================================
@@ -205,23 +187,5 @@ class OCRVerifier:
             "document_type": "UNKNOWN",
             "verified": False,
             "verification_score": 0,
-            "confidence_score": 0.0,
-            "entities": {
-                "license_numbers": [],
-                "vehicle_numbers": [],
-                "dates": [],
-                "engine_numbers": [],
-                "chassis_numbers": [],
-                "policy_numbers": [],
-                "persons": [],
-                "organizations": [],
-                "locations": [],
-                "raw_text": ""
-            },
-            "issues": [
-                reason,
-                "Low OCR confidence"
-            ],
-            "risk_penalty": 100,
-            "raw_text": ""
+            "confidence_score": 0
         }

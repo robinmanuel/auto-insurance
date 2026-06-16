@@ -53,7 +53,12 @@ class VerificationEngine:
             "ROGN": "REGN",
             "HSTEDABOVE": "",
             "APARTMENTS": "",
-            "GENCRATEDINVOICE": "INVOICE"
+            "GENCRATEDINVOICE": "INVOICE",
+            "CHASSLS": "CHASSIS",
+            "CHASIS": "CHASSIS",
+            "CHASS1S": "CHASSIS",
+            "ENG1NE": "ENGINE",
+            "VEH1CLE": "VEHICLE"
         }
 
         for w, c in corrections.items():
