@@ -1,54 +1,47 @@
 # ----------------------------
 # Core App
 # ----------------------------
-streamlit==1.37.1
-numpy==1.26.4
-pandas==2.2.2
+streamlit
+numpy
+pandas
 
 # ----------------------------
 # Computer Vision
 # ----------------------------
 opencv-python-headless
-pillow==10.4.0
+pillow
 
 # ----------------------------
 # YOLO (Ultralytics)
 # ----------------------------
-ultralytics==8.2.103
+ultralytics
 
 # ----------------------------
 # OCR
 # ----------------------------
-easyocr==1.7.1
+easyocr
 
 # ----------------------------
 # PDF processing
 # ----------------------------
-pdf2image==1.17.0
+pdf2image
 
 # ----------------------------
 # Visualization (Dashboard)
 # ----------------------------
-plotly==5.22.0
+plotly
 
 # ----------------------------
 # Utilities
 # ----------------------------
-PyYAML==6.0.2
-tqdm==4.66.5
+PyYAML
+tqdm
 
 # ----------------------------
 # Torch (CPU version recommended for Streamlit deploy)
 # ----------------------------
-torch==2.3.1
-torchvision==0.18.1
-
+torch
+torchvision
 # ----------------------------
 # Optional (performance / stability)
 # ----------------------------
-scipy==1.13.1
-
-onnxruntime==1.18.1
-onnx==1.16.0
-
-spacy==3.8.2
