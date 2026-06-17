@@ -4,7 +4,8 @@ import numpy as np
 from modules.damage_detector import CarPartDetector, DamageDetector
 from modules.ocr_verifier import OCRVerifier
 from modules.risk_engine import RiskEngine
-
+from modules.utils import get_iou
+from modules.damage_rules import is_damage_valid_for_part
 
 # =========================================================
 # PAGE CONFIG
@@ -34,16 +35,59 @@ def load_system():
 part_detector, damage_detector, ocr_engine, risk_engine = load_system()
 
 
+
 # =========================================================
 # SIDEBAR
 # =========================================================
 st.sidebar.header("Customer Profile")
 
-age = st.sidebar.number_input("Age", 18, 100, 30)
-experience = st.sidebar.number_input("Driving Experience", 0, 60, 5)
-previous_claims = st.sidebar.number_input("Previous Claims", 0, 20, 0)
+age = st.sidebar.number_input(
+    "Age",
+    min_value=18,
+    max_value=100,
+    value=30
+)
 
+experience = st.sidebar.number_input(
+    "Driving Experience (Years)",
+    min_value=0,
+    max_value=60,
+    value=5
+)
 
+previous_claims = st.sidebar.number_input(
+    "Previous Claims",
+    min_value=0,
+    max_value=20,
+    value=0
+)
+
+vehicle_age = st.sidebar.number_input(
+    "Vehicle Age (Years)",
+    min_value=0,
+    max_value=30,
+    value=5
+)
+
+accidents_last_5_years = st.sidebar.number_input(
+    "Accidents (Last 5 Years)",
+    min_value=0,
+    max_value=20,
+    value=0
+)
+
+annual_mileage = st.sidebar.number_input(
+    "Annual Mileage (km)",
+    min_value=0,
+    max_value=200000,
+    value=15000,
+    step=1000
+)
+
+commercial_use = st.sidebar.checkbox(
+    "Commercial Vehicle Use",
+    value=False
+)
 st.sidebar.header("Upload Documents")
 
 doc_files = st.sidebar.file_uploader(
@@ -77,7 +121,11 @@ if run:
     profile = {
         "age": age,
         "experience": experience,
-        "previous_claims": previous_claims
+        "previous_claims": previous_claims,
+        "vehicle_age": vehicle_age,
+        "accidents_last_5_years": accidents_last_5_years,
+        "annual_mileage": annual_mileage,
+        "commercial_use": commercial_use
     }
 
     # =====================================================
@@ -115,22 +163,27 @@ if run:
             for part in parts:
 
                 best_damage = None
-                best_iou = 0
+                best_iou = 0.0
 
                 for dmg in damages:
 
-                    x1 = max(part["bbox"][0], dmg["bbox"][0])
-                    y1 = max(part["bbox"][1], dmg["bbox"][1])
-                    x2 = min(part["bbox"][2], dmg["bbox"][2])
-                    y2 = min(part["bbox"][3], dmg["bbox"][3])
+                    if not is_damage_valid_for_part(
+                        part["class_name"],
+                        dmg["damage_type"]
+                    ):
+                        continue
 
-                    inter = max(0, x2 - x1) * max(0, y2 - y1)
+                    iou = get_iou(
+                        part["bbox"],
+                        dmg["bbox"]
+                    )
 
-                    if inter > best_iou:
-                        best_iou = inter
+                    if iou > best_iou:
+                        best_iou = iou
                         best_damage = dmg
 
-                if best_damage and best_iou > 0:
+    #    Require meaningful overlap
+                if best_damage and best_iou >= 0.15:
 
                     damage_type = best_damage["damage_type"]
                     damage_conf = best_damage["confidence"]
@@ -147,9 +200,9 @@ if run:
                     cost = cost_map.get(damage_type, 0)
 
                 else:
-                    damage_type = "no_damage"
-                    damage_conf = 0
-                    cost = 0
+                    continue
+
+
 
                 total_cost += cost
 
